@@ -38,6 +38,20 @@ fn serialize_ciphers(ciphers: &[TlsCipherSuiteID]) -> Vec<(String, String)> {
     result
 }
 
+fn serialize_session_id(session_id: &Option<&[u8]>) -> Vec<(String, String)> {
+    if let Some(s_id) = session_id {
+        vec![
+            (
+                "Session ID Length".to_string(),
+                format!("{:02X}", s_id.len()),
+            ),
+            ("Session ID".to_string(), bytes_to_hex(s_id)),
+        ]
+    } else {
+        vec![("Session ID Length".to_string(), "00".to_string())]
+    }
+}
+
 fn serialize_ext(ext: &[u8]) -> Vec<(String, String)> {
     match parse_tls_extension(ext) {
         Err(_) => vec![],
@@ -78,15 +92,7 @@ fn serialize_msg_handshake(hs: TlsMessageHandshake) -> Vec<(String, String)> {
 
             content.push(("rand_data".to_string(), bytes_to_hex(hello.rand_data)));
 
-            if let Some(s_id) = hello.session_id {
-                content.push((
-                    "Session ID Length".to_string(),
-                    format!("{:02X}", s_id.len()),
-                ));
-                content.push(("Session ID".to_string(), bytes_to_hex(s_id)));
-            } else {
-                content.push(("Session ID Length".to_string(), "00".to_string()));
-            }
+            content.append(&mut serialize_session_id(&hello.session_id));
 
             content.append(&mut serialize_ciphers(&hello.ciphers));
 
@@ -109,6 +115,55 @@ fn serialize_msg_handshake(hs: TlsMessageHandshake) -> Vec<(String, String)> {
                 / 2;
             result.push((
                 format!("Client Hello Length ({})", content_bytes),
+                format!("{:06X}", content_bytes),
+            ));
+
+            result.append(&mut content);
+            result
+        }
+
+        TlsMessageHandshake::ServerHello(hello) => {
+            let mut content = vec![(
+                format!("{}", hello.version),
+                format!("{:04X}", hello.version.0),
+            )];
+
+            content.push((
+                format!("rand_time ({})", hello.rand_time),
+                format!("{:08X}", hello.rand_time),
+            ));
+
+            content.push(("rand_data".to_string(), bytes_to_hex(hello.rand_data)));
+
+            content.append(&mut serialize_session_id(&hello.session_id));
+
+            content.push((
+                "Cipher Suite".to_string(),
+                format!(
+                    "{}",
+                    hello
+                        .cipher
+                        .get_ciphersuite()
+                        .map_or_else(|| "Unknown", |c| c.name)
+                ),
+            ));
+
+            content.push((
+                "Compression".to_string(),
+                format!("{:04X}", hello.compression.0),
+            ));
+
+            content.append(&mut serialize_exts(hello.ext));
+
+            let mut result = vec![("Type (server hello)".to_string(), "02".to_string())];
+            let content_bytes = content
+                .iter()
+                .map(|v| v.1.clone())
+                .collect::<String>()
+                .len()
+                / 2;
+            result.push((
+                format!("Server Hello Length ({})", content_bytes),
                 format!("{:06X}", content_bytes),
             ));
 
